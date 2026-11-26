@@ -12,6 +12,9 @@
 Ce fork de [Lunii.QT](https://github.com/o-daneel/Lunii.QT) ajoute la **création de livres audio** : un fichier MP3 par chapitre et une image de couverture deviennent une histoire pour votre **Lunii** ou votre **Flam**, avec un menu des chapitres et des annonces vocales.  
 **Toutes les fonctions d'origine de Lunii.QT sont conservées.**
 
+📥 **[Télécharger la dernière version (Windows, portable)](https://github.com/starlyner-boop/Lunii.QT/releases/latest)**: dézippez, puis lancez `Lunii-Qt.exe`.  
+🔀 Proposé à l'auteur d'origine : [o-daneel/Lunii.QT#92](https://github.com/o-daneel/Lunii.QT/pull/92)
+
 ### Ce que ça apporte
 * **Nouveau menu** `Histoires > Créer un livre audio…` (raccourci `Ctrl+B`), ou glissez simplement vos MP3 / leur dossier sur la liste des histoires.
 * **Remplissage automatique** : titre (tags album ou nom du dossier), noms des chapitres (tags ou noms de fichiers, sans les numéros de piste), couverture (`cover.jpg`/`folder.jpg` du dossier ou image intégrée aux MP3).
