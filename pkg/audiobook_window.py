@@ -1,28 +1,27 @@
 """
-"Créer un livre audio" dialog : pick MP3 chapters + a cover, build a STUdio pack and import it.
+"Create an audiobook" dialog : pick MP3 chapters + a cover, build a STUdio pack and import it.
 """
 import os
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6 import QtCore
 from PySide6.QtCore import Qt, QObject, QThread, Signal, QUrl
 from PySide6.QtGui import QPixmap, QDesktopServices
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QPushButton,
                                QListWidget, QListWidgetItem, QFileDialog, QCheckBox, QProgressBar, QMessageBox,
                                QAbstractItemView, QGroupBox, QFrame)
 
-from pkg.api.audiobook import (AUDIO_EXT, IMAGE_EXT, Chapter, build_audiobook_pack, find_cover, guess_book_title,
-                               guess_chapter_name, natural_key, safe_filename, tts_available)
+from pkg.api.audiobook import (AUDIO_EXT, IMAGE_EXT, BuildAborted, Chapter, build_audiobook_pack, default_chapter_name,
+                               find_cover, guess_book_title, guess_chapter_name, natural_key, safe_filename,
+                               tts_available)
 from pkg.api.constants import which_ffmpeg
 
-DEFAULT_OUT_DIR = str(Path.home() / "Documents" / "Lunii - Livres audio")
 ROLE_PATH = Qt.UserRole
 
 
 class _BuildWorker(QObject):
     progress = Signal(int, int, str)
-    finished = Signal(str, str)   # zip path, error message
+    finished = Signal(str, str, bool)   # zip path, error message, aborted
 
     def __init__(self, kwargs):
         super().__init__()
@@ -33,13 +32,15 @@ class _BuildWorker(QObject):
         try:
             path = build_audiobook_pack(progress=lambda a, b, m: self.progress.emit(a, b, m),
                                         abort=lambda: self.aborted, **self.kwargs)
-            self.finished.emit(path, "")
+            self.finished.emit(path, "", False)
+        except BuildAborted:
+            self.finished.emit("", "", True)
         except Exception as e:
-            self.finished.emit("", str(e))
+            self.finished.emit("", str(e), False)
 
 
 class ChapterList(QListWidget):
-    """Reorderable list that also accepts audio files dropped from the explorer."""
+    """Reorderable list that also accepts audio files dropped from the file explorer."""
     files_dropped = Signal(list)
 
     def __init__(self, parent=None):
@@ -73,7 +74,7 @@ class ChapterList(QListWidget):
 class AudiobookDialog(QDialog):
     def __init__(self, parent=None, can_import=False, files: Optional[List[str]] = None):
         super().__init__(parent)
-        self.setWindowTitle("Créer un livre audio")
+        self.setWindowTitle(self.tr("Create an audiobook"))
         self.setMinimumSize(720, 560)
         self.can_import = can_import
         self.cover: Optional[bytes] = None
@@ -82,6 +83,7 @@ class AudiobookDialog(QDialog):
         self.thread: Optional[QThread] = None
         self.worker: Optional[_BuildWorker] = None
         self.import_after = False
+        self.default_out_dir = str(Path.home() / "Documents" / self.tr("Lunii - Audiobooks"))
 
         self._build_ui()
         self._update_buttons()
@@ -95,33 +97,33 @@ class AudiobookDialog(QDialog):
         # title + cover
         top = QHBoxLayout()
         info = QGridLayout()
-        info.addWidget(QLabel("Titre du livre :"), 0, 0)
+        info.addWidget(QLabel(self.tr("Book title:")), 0, 0)
         self.le_title = QLineEdit()
-        self.le_title.setPlaceholderText("ex : Le Petit Prince")
+        self.le_title.setPlaceholderText(self.tr("e.g. The Little Prince"))
         self.le_title.textChanged.connect(self._update_buttons)
         info.addWidget(self.le_title, 0, 1)
-        info.addWidget(QLabel("Description :"), 1, 0)
+        info.addWidget(QLabel(self.tr("Description:")), 1, 0)
         self.le_desc = QLineEdit()
-        self.le_desc.setPlaceholderText("(facultatif)")
+        self.le_desc.setPlaceholderText(self.tr("(optional)"))
         info.addWidget(self.le_desc, 1, 1)
         info.setRowStretch(2, 1)
         top.addLayout(info, 1)
 
         cover_box = QVBoxLayout()
-        self.lbl_cover = QLabel("Aucune\ncouverture")
+        self.lbl_cover = QLabel(self.tr("No\ncover"))
         self.lbl_cover.setFixedSize(160, 120)
         self.lbl_cover.setAlignment(Qt.AlignCenter)
         self.lbl_cover.setFrameShape(QFrame.Box)
-        self.lbl_cover.setToolTip("Cliquez pour choisir l'image de couverture")
+        self.lbl_cover.setToolTip(self.tr("Click to choose the cover picture"))
         self.lbl_cover.mousePressEvent = lambda e: self.choose_cover()
         cover_box.addWidget(self.lbl_cover)
         row = QHBoxLayout()
-        btn = QPushButton("Couverture…")
+        btn = QPushButton(self.tr("Cover..."))
         btn.clicked.connect(self.choose_cover)
         row.addWidget(btn)
         self.btn_cover_rm = QPushButton("✕")
         self.btn_cover_rm.setFixedWidth(28)
-        self.btn_cover_rm.setToolTip("Retirer la couverture")
+        self.btn_cover_rm.setToolTip(self.tr("Remove the cover"))
         self.btn_cover_rm.clicked.connect(lambda: self.set_cover(None, auto=False))
         row.addWidget(self.btn_cover_rm)
         cover_box.addLayout(row)
@@ -129,11 +131,11 @@ class AudiobookDialog(QDialog):
         root.addLayout(top)
 
         # chapters
-        group = QGroupBox("Chapitres, dans l'ordre de lecture")
+        group = QGroupBox(self.tr("Chapters, in reading order"))
         gl = QHBoxLayout(group)
         self.list = ChapterList()
-        self.list.setToolTip("Double-clic : renommer (c'est ce nom qui sera annoncé)\n"
-                             "Glisser : réordonner\nVous pouvez aussi déposer ici des MP3, un dossier ou une image")
+        self.list.setToolTip(self.tr("Double-click: rename (this name is the one announced)\n"
+                                     "Drag: reorder\nYou can also drop MP3 files, a folder or a picture here"))
         self.list.files_dropped.connect(self.add_paths)
         self.list.model().rowsInserted.connect(self._update_buttons)
         self.list.model().rowsRemoved.connect(self._update_buttons)
@@ -141,21 +143,21 @@ class AudiobookDialog(QDialog):
         gl.addWidget(self.list, 1)
 
         side = QVBoxLayout()
-        for text, slot in [("Ajouter des MP3…", self.add_files),
-                           ("Ajouter un dossier…", self.add_folder)]:
+        for text, slot in [(self.tr("Add MP3 files..."), self.add_files),
+                           (self.tr("Add a folder..."), self.add_folder)]:
             b = QPushButton(text)
             b.clicked.connect(slot)
             side.addWidget(b)
         side.addSpacing(10)
-        self.btn_up = QPushButton("▲ Monter")
+        self.btn_up = QPushButton(self.tr("▲ Up"))
         self.btn_up.clicked.connect(lambda: self.move_selected(-1))
-        self.btn_down = QPushButton("▼ Descendre")
+        self.btn_down = QPushButton(self.tr("▼ Down"))
         self.btn_down.clicked.connect(lambda: self.move_selected(1))
-        self.btn_sort = QPushButton("Trier par nom de fichier")
+        self.btn_sort = QPushButton(self.tr("Sort by file name"))
         self.btn_sort.clicked.connect(self.sort_by_filename)
-        self.btn_rm = QPushButton("Retirer")
+        self.btn_rm = QPushButton(self.tr("Remove"))
         self.btn_rm.clicked.connect(self.remove_selected)
-        self.btn_clear = QPushButton("Tout vider")
+        self.btn_clear = QPushButton(self.tr("Clear all"))
         self.btn_clear.clicked.connect(self.list.clear)
         for b in (self.btn_up, self.btn_down, self.btn_sort, self.btn_rm, self.btn_clear):
             side.addWidget(b)
@@ -164,20 +166,20 @@ class AudiobookDialog(QDialog):
         root.addWidget(group, 1)
 
         # options
-        opts = QGroupBox("Options")
+        opts = QGroupBox(self.tr("Options"))
         ol = QGridLayout(opts)
-        self.cb_tts = QCheckBox("Annoncer le titre et le nom des chapitres avec une voix de synthèse")
+        self.cb_tts = QCheckBox(self.tr("Announce the title and chapter names with a synthetic voice"))
         self.cb_tts.setChecked(tts_available())
         self.cb_tts.setEnabled(tts_available())
         if not tts_available():
-            self.cb_tts.setToolTip("Disponible uniquement sous Windows")
+            self.cb_tts.setToolTip(self.tr("Only available on Windows"))
         ol.addWidget(self.cb_tts, 0, 0, 1, 3)
-        self.cb_nm = QCheckBox("Activer le mode nuit")
+        self.cb_nm = QCheckBox(self.tr("Enable night mode"))
         ol.addWidget(self.cb_nm, 1, 0, 1, 3)
-        ol.addWidget(QLabel("Dossier des packs :"), 2, 0)
-        self.le_out = QLineEdit(DEFAULT_OUT_DIR)
+        ol.addWidget(QLabel(self.tr("Packs folder:")), 2, 0)
+        self.le_out = QLineEdit(self.default_out_dir)
         ol.addWidget(self.le_out, 2, 1)
-        b = QPushButton("…")
+        b = QPushButton("...")
         b.setFixedWidth(28)
         b.clicked.connect(self.choose_out_dir)
         ol.addWidget(b, 2, 2)
@@ -192,18 +194,18 @@ class AudiobookDialog(QDialog):
 
         bottom = QHBoxLayout()
         if not which_ffmpeg():
-            warn = QLabel("⚠ FFMPEG introuvable (menu Outils pour l'installer)")
+            warn = QLabel(self.tr("⚠ FFMPEG is missing (see Tools menu to install it)"))
             warn.setStyleSheet("color: #c0392b")
             bottom.addWidget(warn)
         bottom.addStretch(1)
-        self.btn_pack = QPushButton("Créer le pack seulement")
+        self.btn_pack = QPushButton(self.tr("Create pack only"))
         self.btn_pack.clicked.connect(lambda: self.start_build(import_after=False))
-        self.btn_import = QPushButton("Créer et importer")
+        self.btn_import = QPushButton(self.tr("Create and import"))
         self.btn_import.setDefault(True)
         self.btn_import.clicked.connect(lambda: self.start_build(import_after=True))
         if not self.can_import:
-            self.btn_import.setToolTip("Branchez et sélectionnez votre Lunii/Flam pour importer directement")
-        self.btn_close = QPushButton("Fermer")
+            self.btn_import.setToolTip(self.tr("Connect and select your Lunii/Flam to import directly"))
+        self.btn_close = QPushButton(self.tr("Close"))
         self.btn_close.clicked.connect(self.reject)
         for b in (self.btn_pack, self.btn_import, self.btn_close):
             bottom.addWidget(b)
@@ -218,7 +220,7 @@ class AudiobookDialog(QDialog):
         self.btn_pack.setEnabled(ready)
         self.btn_import.setEnabled(ready and self.can_import)
         self.btn_cover_rm.setEnabled(self.cover is not None and not busy)
-        self.btn_close.setText("Annuler" if busy else "Fermer")
+        self.btn_close.setText(self.tr("Cancel") if busy else self.tr("Close"))
 
     # ------------------------------------------------------------------ chapters
     def add_paths(self, paths: List[str]):
@@ -259,12 +261,13 @@ class AudiobookDialog(QDialog):
 
     def add_files(self):
         exts = " ".join(f"*{e}" for e in AUDIO_EXT)
-        files, _ = QFileDialog.getOpenFileNames(self, "Choisir les chapitres", "", f"Fichiers audio ({exts});;Tous (*)")
+        files, _ = QFileDialog.getOpenFileNames(self, self.tr("Choose the chapters"), "",
+                                                self.tr("Audio files") + f" ({exts});;" + self.tr("All files") + " (*)")
         if files:
             self.add_paths(files)
 
     def add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Choisir le dossier du livre audio")
+        folder = QFileDialog.getExistingDirectory(self, self.tr("Choose the audiobook folder"))
         if folder:
             self.add_paths([folder])
 
@@ -296,7 +299,7 @@ class AudiobookDialog(QDialog):
         if self.thread:
             return
         exts = " ".join(f"*{e}" for e in IMAGE_EXT)
-        file, _ = QFileDialog.getOpenFileName(self, "Choisir la couverture", "", f"Images ({exts})")
+        file, _ = QFileDialog.getOpenFileName(self, self.tr("Choose the cover"), "", self.tr("Pictures") + f" ({exts})")
         if file:
             self.set_cover(Path(file).read_bytes(), auto=False)
 
@@ -309,11 +312,11 @@ class AudiobookDialog(QDialog):
         else:
             self.cover = None
             self.lbl_cover.setPixmap(QPixmap())
-            self.lbl_cover.setText("Aucune\ncouverture")
+            self.lbl_cover.setText(self.tr("No\ncover"))
         self._update_buttons()
 
     def choose_out_dir(self):
-        folder = QFileDialog.getExistingDirectory(self, "Dossier des packs", self.le_out.text())
+        folder = QFileDialog.getExistingDirectory(self, self.tr("Packs folder"), self.le_out.text())
         if folder:
             self.le_out.setText(folder)
 
@@ -322,16 +325,17 @@ class AudiobookDialog(QDialog):
         result = []
         for i in range(self.list.count()):
             it = self.list.item(i)
-            result.append(Chapter(it.data(ROLE_PATH), it.text().strip() or f"Chapitre {i + 1}"))
+            result.append(Chapter(it.data(ROLE_PATH), it.text().strip() or default_chapter_name(i + 1)))
         return result
 
     def start_build(self, import_after: bool):
         title = self.le_title.text().strip()
-        out_dir = self.le_out.text().strip() or DEFAULT_OUT_DIR
+        out_dir = self.le_out.text().strip() or self.default_out_dir
         out_zip = os.path.join(out_dir, f"{safe_filename(title)}.zip")
         if os.path.exists(out_zip):
-            if QMessageBox.question(self, "Pack existant",
-                                    f"« {Path(out_zip).name} » existe déjà dans ce dossier.\nLe remplacer ?") != QMessageBox.Yes:
+            answer = QMessageBox.question(self, self.tr("Existing pack"),
+                                          self.tr("'{}' already exists in this folder.\nReplace it?").format(Path(out_zip).name))
+            if answer != QMessageBox.Yes:
                 return
 
         self.import_after = import_after
@@ -355,7 +359,7 @@ class AudiobookDialog(QDialog):
         self.pbar.setValue(step)
         self.lbl_status.setText(msg)
 
-    def on_finished(self, path, error):
+    def on_finished(self, path, error, aborted):
         self.thread.quit()
         self.thread.wait()
         self.worker.deleteLater()
@@ -366,10 +370,10 @@ class AudiobookDialog(QDialog):
         self.list.setEnabled(True)
         self._update_buttons()
 
-        if error:
+        if aborted or error:
             self.lbl_status.setText("")
-            if error != "Création annulée":
-                QMessageBox.critical(self, "Erreur", f"La création du pack a échoué :\n\n{error}")
+            if error:
+                QMessageBox.critical(self, self.tr("Error"), self.tr("The pack creation failed:") + f"\n\n{error}")
             return
 
         self.result_zip = path
@@ -377,12 +381,12 @@ class AudiobookDialog(QDialog):
             self.accept()
             return
 
-        self.lbl_status.setText(f"✅ Pack créé : {path}")
+        self.lbl_status.setText(self.tr("✅ Pack created: {}").format(path))
         box = QMessageBox(self)
-        box.setWindowTitle("Pack créé")
-        box.setText(f"Le pack a été créé :\n{path}\n\nVous pourrez l'importer plus tard via Histoires > Importer, "
-                    f"ou en le glissant sur la liste des histoires.")
-        open_btn = box.addButton("Ouvrir le dossier", QMessageBox.ActionRole)
+        box.setWindowTitle(self.tr("Pack created"))
+        box.setText(self.tr("The pack has been created:\n{}\n\nYou can import it later with Stories > Import, "
+                            "or by dropping it on the story list.").format(path))
+        open_btn = box.addButton(self.tr("Open folder"), QMessageBox.ActionRole)
         box.addButton(QMessageBox.Ok)
         box.exec()
         if box.clickedButton() == open_btn:
@@ -391,6 +395,6 @@ class AudiobookDialog(QDialog):
     def reject(self):
         if self.worker:
             self.worker.aborted = True
-            self.lbl_status.setText("Annulation…")
+            self.lbl_status.setText(self.tr("Cancelling..."))
             return
         super().reject()

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PySide6.QtCore import QCoreApplication, QLocale
 
 from pkg.api.constants import which_ffmpeg
 
@@ -38,6 +39,10 @@ COVER_NAMES = ("cover", "folder", "front", "couverture", "albumart")
 CTRL_COVER = {"wheel": True, "ok": True, "home": False, "pause": False, "autoplay": False}
 CTRL_MENU = {"wheel": True, "ok": True, "home": True, "pause": False, "autoplay": False}
 CTRL_PLAY = {"wheel": False, "ok": False, "home": True, "pause": True, "autoplay": True}
+
+
+class BuildAborted(Exception):
+    pass
 
 
 @dataclass
@@ -71,7 +76,11 @@ def guess_chapter_name(path: str, index: int) -> str:
         pass
 
     cleaned = _strip_track_number(Path(path).stem)
-    return cleaned if cleaned else f"Chapitre {index}"
+    return cleaned if cleaned else default_chapter_name(index)
+
+
+def default_chapter_name(index: int) -> str:
+    return QCoreApplication.translate("Audiobook", "Chapter {}").format(index)
 
 
 def guess_book_title(paths: List[str]) -> str:
@@ -243,16 +252,16 @@ def tts_available() -> bool:
     return platform.system() == "Windows"
 
 
-def synthesize(items: List[tuple], workdir: str):
-    """Windows speech synthesis (French voice if installed). items = [(text, wav_path)]"""
+def synthesize(items: List[tuple], workdir: str, lang: str = ""):
+    """Windows speech synthesis, with a voice matching `lang` (ex: 'fr') if installed. items = [(text, wav_path)]"""
     job = os.path.join(workdir, "tts.json")
     with open(job, "w", encoding="utf-8") as fp:
         json.dump([{"text": t, "path": p} for t, p in items], fp, ensure_ascii=False)
     script = (
         "Add-Type -AssemblyName System.Speech;"
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-        "$fr = $s.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -like 'fr*' } | Select-Object -First 1;"
-        "if ($fr) { $s.SelectVoice($fr.VoiceInfo.Name) };"
+        f"$v = $s.GetInstalledVoices() | Where-Object {{ $_.Enabled -and $_.VoiceInfo.Culture.Name -like '{lang}*' }} | Select-Object -First 1;"
+        "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) };"
         "$s.Rate = -1;"
         f"$jobs = Get-Content -Raw -Encoding UTF8 '{job}' | ConvertFrom-Json;"
         "foreach ($j in $jobs) { $s.SetOutputToWaveFile($j.path); $s.Speak($j.text) };"
@@ -293,16 +302,16 @@ def build_audiobook_pack(title: str,
                          abort: Optional[Callable[[], bool]] = None) -> str:
     """Builds the STUdio zip, returns its path. progress(step, total, message)."""
     if not chapters:
-        raise ValueError("Aucun chapitre")
+        raise ValueError(QCoreApplication.translate("Audiobook", "No chapter to convert"))
     ffmpeg = which_ffmpeg()
     if not ffmpeg:
-        raise RuntimeError("FFMPEG est introuvable : il est nécessaire pour convertir l'audio.")
+        raise RuntimeError(QCoreApplication.translate("Audiobook", "FFMPEG not found: it is required to convert the audio files."))
 
     def report(step, total, msg):
         if progress:
             progress(step, total, msg)
         if abort and abort():
-            raise InterruptedError("Création annulée")
+            raise BuildAborted()
 
     total = len(chapters) + 3
     with tempfile.TemporaryDirectory(prefix="lunii_audiobook_") as tmp:
@@ -317,13 +326,13 @@ def build_audiobook_pack(title: str,
             return name
 
         # --- images
-        report(0, total, "Création des images…")
+        report(0, total, QCoreApplication.translate("Audiobook", "Creating pictures..."))
         img_cover = add_bytes(_asset_name(used_img, ".png"), make_cover_image(cover, title))
         img_chapters = [add_bytes(_asset_name(used_img, ".png"), make_chapter_image(cover, i + 1, len(chapters), ch.name))
                         for i, ch in enumerate(chapters)]
 
         # --- announcements (title + each chapter name)
-        report(1, total, "Création des annonces vocales…")
+        report(1, total, QCoreApplication.translate("Audiobook", "Creating voice announcements..."))
         snd_title = _asset_name(used_snd, ".mp3")
         snd_menus = [_asset_name(used_snd, ".mp3") for _ in chapters]
         texts = [title] + [ch.name for ch in chapters]
@@ -332,7 +341,7 @@ def build_audiobook_pack(title: str,
         if announce and tts_available():
             try:
                 wavs = [(t, os.path.join(tmp, f"tts_{i}.wav")) for i, t in enumerate(texts)]
-                synthesize(wavs, tmp)
+                synthesize(wavs, tmp, QLocale.system().name()[:2])
                 with ThreadPoolExecutor(max_workers=4) as pool:
                     list(pool.map(lambda a: to_lunii_mp3(ffmpeg, a[0][1], os.path.join(tmp, a[1])), zip(wavs, targets)))
                 spoken = True
@@ -349,7 +358,7 @@ def build_audiobook_pack(title: str,
         # --- chapters audio
         snd_chapters = []
         done = 0
-        report(2, total, f"Conversion audio 0/{len(chapters)}…")
+        report(2, total, QCoreApplication.translate("Audiobook", "Converting audio {}/{}...").format(0, len(chapters)))
         with ThreadPoolExecutor(max_workers=max(1, min(4, os.cpu_count() or 1))) as pool:
             futures = []
             for ch in chapters:
@@ -363,9 +372,9 @@ def build_audiobook_pack(title: str,
                 except Exception as e:
                     for f in futures:
                         f.cancel()
-                    raise RuntimeError(f"Conversion impossible de « {Path(ch.path).name} » :\n{e}")
+                    raise RuntimeError(QCoreApplication.translate("Audiobook", "Unable to convert '{}':").format(Path(ch.path).name) + f"\n{e}")
                 done += 1
-                report(2 + done, total, f"Conversion audio {done}/{len(chapters)}…")
+                report(2 + done, total, QCoreApplication.translate("Audiobook", "Converting audio {}/{}...").format(done, len(chapters)))
 
         # --- story.json
         n = len(chapters)
@@ -402,23 +411,24 @@ def build_audiobook_pack(title: str,
             "format": "v1",
             "version": 1,
             "title": title,
-            "description": description or f"Livre audio - {n} chapitre{'s' if n > 1 else ''}",
+            "description": description or (QCoreApplication.translate("Audiobook", "Audiobook - {} chapters").format(n) if n > 1
+                                           else QCoreApplication.translate("Audiobook", "Audiobook - 1 chapter")),
             "nightModeAvailable": night_mode,
             "stageNodes": stages,
             "actionNodes": [
-                {"id": act_menu, "name": "Choix du chapitre", "options": id_menus},
-                {"id": act_play, "name": "Lecture", "options": id_plays},
+                {"id": act_menu, "name": "Chapter menu", "options": id_menus},
+                {"id": act_play, "name": "Playback", "options": id_plays},
             ],
         }
 
         # --- zip
-        report(total - 1, total, "Écriture de l'archive…")
+        report(total - 1, total, QCoreApplication.translate("Audiobook", "Writing archive..."))
         Path(out_zip).parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_STORED) as zf:
             zf.writestr("story.json", json.dumps(story, ensure_ascii=False, indent=1))
             zf.writestr("thumbnail.png", make_thumbnail(cover, title))
             for name, path in assets.items():
                 zf.write(path, f"assets/{name}")
-        report(total, total, "Pack créé")
+        report(total, total, QCoreApplication.translate("Audiobook", "Pack created"))
 
     return out_zip

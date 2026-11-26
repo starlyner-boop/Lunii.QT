@@ -120,7 +120,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     # update ui elements state (enable, disable, context enu)
     def modify_widgets(self):
-        title = f"Lunii Qt-Manager {APP_VERSION} + livres audio"
+        title = f"Lunii Qt-Manager {APP_VERSION}"
         self.setWindowTitle(title)
         self.logger.log(logging.INFO, title)
 
@@ -165,7 +165,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.act_remove = next(act for act in s_actions if act.objectName() == "actionRemove")
 
         # audiobook creation (MP3 chapters + cover => STUdio pack => import)
-        self.act_audiobook = QtGui.QAction("Créer un livre audio…", self)
+        self.act_audiobook = QtGui.QAction(self.tr("Create an audiobook..."), self)
         self.act_audiobook.setObjectName("actionAudiobook")
         self.act_audiobook.setShortcut(QKeySequence("Ctrl+B"))
         self.menuStory.insertAction(self.act_export, self.act_audiobook)
@@ -195,7 +195,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         t_actions = self.menuHelp.actions()
         self.act_update = next(act for act in t_actions if act.objectName() == "actionUpdate")
         self.act_update.setVisible(False)
-        self.act_tutorial = QtGui.QAction("Tutoriel : livres audio…", self)
+        self.act_tutorial = QtGui.QAction(self.tr("Audiobook tutorial..."), self)
         self.act_tutorial.setObjectName("actionAudiobookTutorial")
         act_about = next(act for act in t_actions if act.objectName() == "actionAbout")
         self.menuHelp.insertAction(act_about, self.act_tutorial)

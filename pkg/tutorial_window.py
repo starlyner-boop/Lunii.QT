@@ -1,6 +1,6 @@
 """
-Startup tutorial for the "Créer un livre audio" feature.
-Shown at launch until "Ne plus afficher au démarrage" is ticked, can be reopened from the Help menu.
+Startup tutorial for the "Create an audiobook" feature.
+Shown at launch until "Do not show again at startup" is ticked, can be reopened from the Help menu.
 """
 import json
 import os
@@ -51,13 +51,12 @@ class FlowDiagram(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        pal = self.palette()
-        fg = pal.windowText().color()
+        fg = self.palette().windowText().color()
         accent = QColor(41, 128, 185)
 
-        screens = [("📖", "Couverture", "titre annoncé"),
-                   ("1 / 9", "Menu", "molette = chapitre"),
-                   ("▶", "Lecture", "enchaîne la suite")]
+        screens = [("📖", self.tr("Cover"), self.tr("title announced")),
+                   ("1 / 9", self.tr("Menu"), self.tr("wheel = chapter")),
+                   ("▶", self.tr("Playback"), self.tr("chains the next one"))]
         w, h, gap = 120, 90, 50
         total = len(screens) * w + (len(screens) - 1) * gap
         x0 = (self.width() - total) / 2
@@ -98,46 +97,8 @@ class FlowDiagram(QWidget):
 
 
 # ---------------------------------------------------------------------- pages
-PAGES = [
-    ("🎧", "Nouveau : vos livres audio sur la Lunii / Flam",
-     "Lunii.QT peut maintenant transformer un <b>livre audio</b> (un fichier MP3 par chapitre) "
-     "en histoire pour votre conteuse, avec une couverture, un menu des chapitres et des annonces vocales."
-     "<br><br>Pour commencer :"
-     "<ul><li>menu <b>Histoires → Créer un livre audio…</b> (raccourci <b>Ctrl+B</b>)</li>"
-     "<li>ou <b>glissez vos MP3</b> (ou leur dossier) directement sur la liste des histoires.</li></ul>",
-     None),
-    ("📂", "1. Choisir les chapitres",
-     "<ul><li><b>Ajouter des MP3…</b> ou <b>Ajouter un dossier…</b> : les fichiers sont triés dans l'ordre de leur nom.</li>"
-     "<li><b>Glissez</b> les chapitres pour changer l'ordre, ou utilisez ▲ / ▼.</li>"
-     "<li><b>Double-cliquez</b> sur un chapitre pour le renommer : c'est ce nom qui sera <b>annoncé</b> et affiché.</li>"
-     "<li>Le <b>titre</b> et la <b>couverture</b> sont trouvés automatiquement (infos des MP3, image du dossier). "
-     "Cliquez sur la couverture pour en choisir une autre.</li></ul>",
-     None),
-    ("⚙️", "2. Les options",
-     "<ul><li><b>Voix de synthèse</b> : le titre du livre et le nom de chaque chapitre sont lus à voix haute "
-     "dans le menu (voix française de Windows).</li>"
-     "<li><b>Mode nuit</b> : rend le livre disponible dans le mode nuit de la conteuse.</li>"
-     "<li><b>Dossier des packs</b> : une copie de chaque livre y est gardée, pour pouvoir le réimporter plus tard.</li></ul>"
-     "<i>FFMPEG est nécessaire pour convertir l'audio. S'il manque, installez-le depuis le menu <b>Outils</b>.</i>",
-     None),
-    ("📥", "3. Importer sur la conteuse",
-     "<ul><li>Branchez votre Lunii / Flam et sélectionnez-la en haut de la fenêtre.</li>"
-     "<li><b>Créer et importer</b> : le livre est préparé puis envoyé directement.</li>"
-     "<li><b>Créer le pack seulement</b> : pour l'importer plus tard (Histoires → Importer, ou glisser le .zip).</li></ul>"
-     "⏳ La Flam est lente en USB (environ 1 minute pour 35 Mo) : soyez patient.<br>"
-     "⚠️ La Flam doit être en <b>firmware 2.x</b>. Pensez à <b>éjecter</b> la conteuse avant de la débrancher.",
-     None),
-    ("🧒", "4. Sur la conteuse",
-     "<ul><li>Choisissez le livre comme une histoire : sa couverture s'affiche et le titre est annoncé.</li>"
-     "<li><b>OK</b> ouvre le menu : tournez la <b>molette</b> pour choisir un chapitre, puis <b>OK</b>.</li>"
-     "<li>À la fin d'un chapitre, <b>le suivant démarre tout seul</b>.</li>"
-     "<li>Le bouton <b>Maison</b> revient au menu, <b>sur le chapitre en cours</b> : pratique pour reprendre plus tard.</li></ul>",
-     FlowDiagram),
-]
-
-
 class _Page(QWidget):
-    def __init__(self, icon, title, html, extra_cls):
+    def __init__(self, icon, title, html, extra_cls=None):
         super().__init__()
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 16, 24, 8)
@@ -172,12 +133,12 @@ class TutorialDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Livres audio - tutoriel")
+        self.setWindowTitle(self.tr("Audiobooks - tutorial"))
         self.setFixedSize(600, 470)
 
         root = QVBoxLayout(self)
         self.stack = QStackedWidget()
-        for page in PAGES:
+        for page in self.pages():
             self.stack.addWidget(_Page(*page))
         root.addWidget(self.stack, 1)
 
@@ -186,25 +147,59 @@ class TutorialDialog(QDialog):
         root.addWidget(self.lbl_dots)
 
         bottom = QHBoxLayout()
-        self.cb_hide = QCheckBox("Ne plus afficher au démarrage")
+        self.cb_hide = QCheckBox(self.tr("Do not show again at startup"))
         self.cb_hide.setChecked(not tutorial_enabled())
         self.cb_hide.toggled.connect(lambda checked: set_tutorial_enabled(not checked))
         bottom.addWidget(self.cb_hide)
         bottom.addStretch(1)
-        self.btn_prev = QPushButton("◀ Précédent")
+        self.btn_prev = QPushButton(self.tr("◀ Previous"))
         self.btn_prev.clicked.connect(lambda: self.go(-1))
-        self.btn_next = QPushButton("Suivant ▶")
+        self.btn_next = QPushButton(self.tr("Next ▶"))
         self.btn_next.setDefault(True)
         self.btn_next.clicked.connect(lambda: self.go(1))
-        self.btn_create = QPushButton("Créer un livre audio")
+        self.btn_create = QPushButton(self.tr("Create an audiobook"))
         self.btn_create.clicked.connect(self._create)
-        self.btn_close = QPushButton("Fermer")
+        self.btn_close = QPushButton(self.tr("Close"))
         self.btn_close.clicked.connect(self.accept)
         for b in (self.btn_prev, self.btn_next, self.btn_create, self.btn_close):
             bottom.addWidget(b)
         root.addLayout(bottom)
 
         self._refresh()
+
+    def pages(self):
+        return [
+            ("🎧", self.tr("New: your audiobooks on the Lunii / Flam"),
+             self.tr("Lunii.QT can now turn an <b>audiobook</b> (one MP3 file per chapter) into a story for your "
+                     "storyteller, with a cover, a chapter menu and voice announcements."
+                     "<br><br>To start:"
+                     "<ul><li>menu <b>Stories → Create an audiobook...</b> (shortcut <b>Ctrl+B</b>)</li>"
+                     "<li>or <b>drop your MP3 files</b> (or their folder) directly on the story list.</li></ul>")),
+            ("📂", self.tr("1. Choose the chapters"),
+             self.tr("<ul><li><b>Add MP3 files...</b> or <b>Add a folder...</b>: files are sorted by name.</li>"
+                     "<li><b>Drag</b> the chapters to change their order, or use ▲ / ▼.</li>"
+                     "<li><b>Double-click</b> a chapter to rename it: this name is the one <b>announced</b> and displayed.</li>"
+                     "<li>The <b>title</b> and the <b>cover</b> are found automatically (MP3 tags, picture in the folder). "
+                     "Click on the cover to choose another one.</li></ul>")),
+            ("⚙️", self.tr("2. Options"),
+             self.tr("<ul><li><b>Synthetic voice</b>: the book title and each chapter name are read aloud "
+                     "in the menu (Windows voices).</li>"
+                     "<li><b>Night mode</b>: makes the book available in the storyteller night mode.</li>"
+                     "<li><b>Packs folder</b>: a copy of each book is kept there, to import it again later.</li></ul>"
+                     "<i>FFMPEG is required to convert the audio. If it is missing, install it from the <b>Tools</b> menu.</i>")),
+            ("📥", self.tr("3. Import on the storyteller"),
+             self.tr("<ul><li>Connect your Lunii / Flam and select it at the top of the window.</li>"
+                     "<li><b>Create and import</b>: the book is prepared then sent directly.</li>"
+                     "<li><b>Create pack only</b>: to import it later (Stories → Import, or drop the .zip).</li></ul>"
+                     "⏳ The Flam is slow over USB (about 1 minute for 35 MB): please be patient.<br>"
+                     "⚠️ The Flam must run <b>firmware 2.x</b>. Remember to <b>eject</b> the storyteller before unplugging it.")),
+            ("🧒", self.tr("4. On the storyteller"),
+             self.tr("<ul><li>Choose the book like any story: its cover is displayed and the title is announced.</li>"
+                     "<li><b>OK</b> opens the menu: turn the <b>wheel</b> to choose a chapter, then <b>OK</b>.</li>"
+                     "<li>At the end of a chapter, <b>the next one starts automatically</b>.</li>"
+                     "<li>The <b>Home</b> button goes back to the menu, <b>on the current chapter</b>: handy to resume later.</li></ul>"),
+             FlowDiagram),
+        ]
 
     def go(self, offset):
         self.stack.setCurrentIndex(max(0, min(self.stack.count() - 1, self.stack.currentIndex() + offset)))
