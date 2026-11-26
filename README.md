@@ -5,6 +5,51 @@
 
 :uk: [English README](./README_EN.md) :uk:
 
+---
+
+# 🎧 Fork « livres audio »
+
+Ce fork de [Lunii.QT](https://github.com/o-daneel/Lunii.QT) ajoute la **création de livres audio** : un fichier MP3 par chapitre et une image de couverture deviennent une histoire pour votre **Lunii** ou votre **Flam**, avec un menu des chapitres et des annonces vocales.  
+**Toutes les fonctions d'origine de Lunii.QT sont conservées.**
+
+### Ce que ça apporte
+* **Nouveau menu** `Histoires > Créer un livre audio…` (raccourci `Ctrl+B`), ou glissez simplement vos MP3 / leur dossier sur la liste des histoires.
+* **Remplissage automatique** : titre (tags album ou nom du dossier), noms des chapitres (tags ou noms de fichiers, sans les numéros de piste), couverture (`cover.jpg`/`folder.jpg` du dossier ou image intégrée aux MP3).
+* **Chapitres modifiables** : réordonner par glisser-déposer ou ▲ / ▼, renommer par double-clic (c'est ce nom qui est annoncé).
+* **Annonces vocales** : le titre et chaque chapitre sont lus par la voix française de Windows.
+* **Images générées** pour chaque chapitre (nom du chapitre + position `2 / 9`) à partir de la couverture.
+* **Créer et importer** en un clic, ou **créer le pack seulement** (archive STUdio `.zip`, gardée dans `Documents\Lunii - Livres audio` pour pouvoir la réimporter).
+* Option **mode nuit**.
+* **Tutoriel au démarrage** (5 pages) avec la case « Ne plus afficher au démarrage », toujours disponible dans `Aide > Tutoriel : livres audio…`.
+
+<img src="./res/audiobook/dialog.png" width="600">
+
+### Sur la conteuse
+| Écran | Molette | OK | Maison |
+|---|---|---|---|
+| **Couverture** (titre annoncé) | choisir une histoire | ouvrir le menu des chapitres | – |
+| **Menu des chapitres** (chapitre annoncé) | choisir un chapitre | lancer la lecture | retour aux histoires |
+| **Lecture** | – | – | retour au menu, **sur le chapitre en cours** |
+
+À la fin d'un chapitre, **le suivant démarre automatiquement**. La conteuse ne retient pas la position de lecture : le menu des chapitres permet de reprendre facilement.
+
+<img src="./res/audiobook/device.png" width="800">
+
+<img src="./res/audiobook/tutorial.png" width="450">
+
+### Prérequis
+* **FFMPEG** pour convertir l'audio (menu `Outils` de Lunii.QT, ou `winget install Gyan.FFmpeg`).
+* **Flam en firmware 2.x** (comme pour toutes les histoires STUdio).
+* **Windows** pour les annonces vocales (sinon les menus sont silencieux, le reste fonctionne).
+
+### Fonctionnement technique
+Le livre est converti en pack **STUdio** standard (`story.json` + `assets/`), puis importé par le code d'import STUdio existant de Lunii.QT. L'audio est converti au format attendu (MP3 mono 44,1 kHz, sans tags), donc aucune conversion supplémentaire n'a lieu à l'import.  
+Code ajouté : [`pkg/api/audiobook.py`](./pkg/api/audiobook.py) (création du pack), [`pkg/audiobook_window.py`](./pkg/audiobook_window.py) (fenêtre), [`pkg/tutorial_window.py`](./pkg/tutorial_window.py) (tutoriel), et quelques lignes dans [`pkg/main_window.py`](./pkg/main_window.py).
+
+> ⚠️ Avant une synchronisation avec l'application officielle, pensez à **cacher** vos livres audio (`Histoires > Hide / Show`, voir plus bas), sinon ils risquent d'être supprimés. Gardez aussi une sauvegarde de votre firmware ([voir ici](#mise-à-jour-du-firmware)).
+
+---
+
 # Lunii.QT
 
 Une application Python QT pour gérer sa fabrique à histoires (fah) <u>Lunii</u> et <u>Flam</u>, avec les opérations de  **organisation** / **importation** / **exportation** / **téléchargement du firmware**   
